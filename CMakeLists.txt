@@ -13,6 +13,7 @@ find_package(tf2_ros REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # ---------------- Includes ----------------
 include_directories(
@@ -68,6 +69,23 @@ ament_target_dependencies(velocity_logger
   std_msgs
 )
 
+add_executable(tagfollow src/tagfollow.cpp)
+ament_target_dependencies(tagfollow
+  rclcpp
+  sensor_msgs
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  tf2
+  tf2_ros
+)
+add_executable(visual src/visual.cpp)
+ament_target_dependencies(visual
+  rclcpp
+  geometry_msgs
+  visualization_msgs
+  tf2_ros
+)
 # ---------------- Install ----------------
 install(TARGETS
   hello_cpp
@@ -81,6 +99,8 @@ install(TARGETS
   RefPublisher
   KalmanNode
   velocity_logger
+  tagfollow
+  visual
   DESTINATION lib/${PROJECT_NAME}
 )
 
