@@ -8,7 +8,6 @@ Panels:
         - /Status1
         - /1
         - /1/Frames1
-        - /1/Frames1/camera_optical1
         - /RobotModel1
       Splitter Ratio: 0.5
     Tree Height: 220
@@ -58,7 +57,9 @@ Visualization Manager:
         All Enabled: false
         base_link:
           Value: false
-        camera_optical:
+        camera_gimbal:
+          Value: false
+        camera_link:
           Value: true
         odom:
           Value: false
@@ -78,8 +79,9 @@ Visualization Manager:
       Tree:
         odom:
           base_link:
-            camera_optical:
-              {}
+            camera_link:
+              camera_gimbal:
+                {}
             propeller_back_left:
               {}
             propeller_back_right:
@@ -201,7 +203,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 1.38606595993042
+      Distance: 1.3464347124099731
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -239,5 +241,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 2560
-  X: 1366
+  X: 1920
   Y: 0

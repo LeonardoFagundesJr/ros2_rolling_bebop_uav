@@ -9,12 +9,7 @@ def generate_launch_description():
     rviz_config = os.path.join(pkg_share, 'others', 'bebop2.rviz')
 
     return LaunchDescription([
-        Node(
-            package='nero_drone',
-            executable='calibration_publish.py',
-            name='calibration_publish',
-            output='screen'
-        ),
+        # --- Calibration Publisher ---
         Node(
             package='nero_drone',
             executable='tf_cam',
@@ -26,7 +21,9 @@ def generate_launch_description():
             executable='tf_tag_bebop',
             name='tf_tag_bebop',
             output='screen'
-        ),
+        ),        
+
+        # --- Robot State Publisher ---
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -35,10 +32,17 @@ def generate_launch_description():
             parameters=[{'robot_description': open(urdf_file).read()}]
         ),
 
+        # --- Visualization ---
         Node(
             package='rviz2',
             executable='rviz2',
             arguments=['-d', rviz_config],
+            output='screen'
+        ),
+        Node(
+            package='nero_drone',
+            executable='bebop_control_gui.py',
+            name='bebop_control_gui',
             output='screen'
         ),
     ])

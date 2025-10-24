@@ -1,109 +1,187 @@
+// CameraTFWithGimbal: ROS2 node that publishes three TFs:
+// 1. base_link → absolute_cam_link (fixed tilt offset)
+// 2. base_link → camera_link (dynamic pitch motion at constant speed)
+// 3. camera_link → camera_gimbal (stabilized, roll-compensated, limited to absolute angles)
+// Author: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), in collaboration with UFV.
+
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
-#include <tf2_ros/transform_broadcaster.h>
+#include <nav_msgs/msg/odometry.hpp>
 #include <tf2/LinearMath/Quaternion.h>
-#include <cmath>
+#include <tf2/LinearMath/Matrix3x3.h>
+#include <tf2_ros/transform_broadcaster.h>
 #include <algorithm>
+#include <chrono>
 
-class CameraTFController : public rclcpp::Node {
+using namespace std::chrono_literals;
+
+class CameraTFWithGimbal : public rclcpp::Node {
 public:
-    CameraTFController() : Node("camera_tf_controller") {
+    CameraTFWithGimbal() : Node("camera_tf_with_gimbal") {
         tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-
-        // Sub al comando de cámara
-        sub_cmd_ = this->create_subscription<geometry_msgs::msg::Vector3>(
+        sub_odom_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/bebop/odom", 10,
+            std::bind(&CameraTFWithGimbal::odom_callback, this, std::placeholders::_1));
+        sub_move_camera_ = this->create_subscription<geometry_msgs::msg::Vector3>(
             "/bebop/move_camera", 10,
-            std::bind(&CameraTFController::cmdCallback, this, std::placeholders::_1));
+            std::bind(&CameraTFWithGimbal::move_camera_callback, this, std::placeholders::_1));
+        timer_ = this->create_wall_timer(20ms, std::bind(&CameraTFWithGimbal::update_camera_pitch, this));
 
-        // Timer para control (50 Hz = 20 ms)
-        timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(5),
-            std::bind(&CameraTFController::update, this));
-
-        // Inicializar en cero
-        tilt_target_ = 0.0;
-        pan_target_  = 0.0;
-        tilt_current_ = 0.0;
-        pan_current_  = 0.0;
-
-        delay_timer_ = 0.0;
-
-        RCLCPP_INFO(this->get_logger(), "Camera TF Controller node started.");
+        min_pitch_deg_ = -90.0;
+        max_pitch_deg_ = 15.0;
+        min_pitch_ = min_pitch_deg_ * M_PI / 180.0;
+        max_pitch_ = max_pitch_deg_ * M_PI / 180.0;
+        angular_speed_ = 22.0 * M_PI / 180.0;
+        delay_before_move_ = 0.5;
+        tilt_offset_ = -10.0 * M_PI / 180.0;
+        gimbal_abs_max_ = 20.0 * M_PI / 180.0;
+        gimbal_abs_min_ = -100.0 * M_PI / 180.0;
+        current_pitch_ = 0.0;
+        target_pitch_ = 0.0;
+        waiting_ = false;
+        moving_ = false;
+        last_update_time_ = this->now();
+        wait_start_time_ = this->now();
     }
 
 private:
-    void cmdCallback(const geometry_msgs::msg::Vector3::SharedPtr msg) {
-        // Guardar referencias deseadas, con saturación
-        tilt_target_ = std::clamp(msg->x, -90.0, 10.0);   // vertical
-        pan_target_  = std::clamp(msg->y, -70.0, 70.0);   // horizontal
-
-        delay_timer_ = 0.8; // 1 segundo de espera antes de mover
-        RCLCPP_INFO(this->get_logger(),
-            "New target -> Tilt: %.1f°, Pan: %.1f° (after 1s delay)",
-            tilt_target_, pan_target_);
+    void move_camera_callback(const geometry_msgs::msg::Vector3::SharedPtr msg) {
+        double target_deg = std::clamp(msg->x, min_pitch_deg_, max_pitch_deg_);
+        target_pitch_ = target_deg * M_PI / 180.0;
+        waiting_ = true;
+        moving_ = false;
+        wait_start_time_ = this->now();
     }
 
-    void update() {
-        double dt = 0.005; // 50 Hz
+    void update_camera_pitch() {
+        auto now = this->now();
+        double dt = (now - last_update_time_).seconds();
+        last_update_time_ = now;
 
-        if (delay_timer_ > 0.0) {
-            delay_timer_ -= dt;
-            return; // aún no comienza el movimiento
+        if (waiting_) {
+            if ((now - wait_start_time_).seconds() >= delay_before_move_) {
+                waiting_ = false;
+                moving_ = true;
+            } else {
+                publish_absolute_tf();
+                publish_camera_tf(current_pitch_);
+                return;
+            }
         }
 
-        // Velocidades máximas (deg/s)
-        double max_tilt_speed = 100.0 / 5.0; 
-        double max_pan_speed  = 140.0 / 5.0; 
+        if (moving_) {
+            double error = target_pitch_ - current_pitch_;
+            double direction = (error > 0.0) ? 1.0 : -1.0;
+            double delta = direction * angular_speed_ * dt;
+            if (std::fabs(error) <= std::fabs(delta)) {
+                current_pitch_ = target_pitch_;
+                moving_ = false;
+            } else {
+                current_pitch_ += delta;
+            }
+        }
 
-        // --- Tilt ---
-        double tilt_error = tilt_target_ - tilt_current_;
-        double tilt_step = std::clamp(tilt_error, -max_tilt_speed * dt, max_tilt_speed * dt);
-        tilt_current_ += tilt_step;
-
-        // --- Pan ---
-        double pan_error = pan_target_ - pan_current_;
-        double pan_step = std::clamp(pan_error, -max_pan_speed * dt, max_pan_speed * dt);
-        pan_current_ += pan_step;
-
-        // Publicar TF dinámico base_link -> camera_optical
-        geometry_msgs::msg::TransformStamped tf_msg;
-        tf_msg.header.stamp = this->now();
-        tf_msg.header.frame_id = "base_link";
-        tf_msg.child_frame_id = "camera_optical";
-        tf_msg.transform.translation.x = 0.09; // cámara 9 cm delante
-        tf_msg.transform.translation.y = 0.0;
-        tf_msg.transform.translation.z = 0.02;
-
-        // Convertir grados a radianes
-        double tilt_rad = tilt_current_ * M_PI / 180.0;
-        double pan_rad  = pan_current_  * M_PI / 180.0;
-
-        // Nota: ajusta ejes según tu configuración física
-        tf2::Quaternion q;
-        q.setRPY(-M_PI/2 + tilt_rad, 0.0, -M_PI/2 + pan_rad);
-        tf_msg.transform.rotation.x = q.x();
-        tf_msg.transform.rotation.y = q.y();
-        tf_msg.transform.rotation.z = q.z();
-        tf_msg.transform.rotation.w = q.w();
-
-        tf_broadcaster_->sendTransform(tf_msg);
+        publish_absolute_tf();
+        publish_camera_tf(current_pitch_);
     }
 
-    // Subs y pubs
-    rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr sub_cmd_;
+    void publish_absolute_tf() {
+        geometry_msgs::msg::TransformStamped tf_abs;
+        tf_abs.header.stamp = this->get_clock()->now();
+        tf_abs.header.frame_id = "base_link";
+        tf_abs.child_frame_id = "absolute_cam_link";
+        tf_abs.transform.translation.x = 0.09;
+        tf_abs.transform.translation.y = 0.0;
+        tf_abs.transform.translation.z = 0.02;
+
+        tf2::Quaternion q_z, q_x, q_base, q_tilt;
+        q_z.setRPY(0.0, 0.0, -M_PI_2);
+        q_x.setRPY(0.0, M_PI_2, 0.0);
+        q_base = q_x * q_z;
+        q_tilt.setRPY(tilt_offset_, 0.0, 0.0);
+        tf2::Quaternion q_total = q_base * q_tilt;
+        q_total.normalize();
+
+        tf_abs.transform.rotation.x = q_total.x();
+        tf_abs.transform.rotation.y = q_total.y();
+        tf_abs.transform.rotation.z = q_total.z();
+        tf_abs.transform.rotation.w = q_total.w();
+        tf_broadcaster_->sendTransform(tf_abs);
+    }
+
+    void publish_camera_tf(double pitch_angle) {
+        geometry_msgs::msg::TransformStamped tf_cam;
+        tf_cam.header.stamp = this->get_clock()->now();
+        tf_cam.header.frame_id = "base_link";
+        tf_cam.child_frame_id = "camera_link";
+        tf_cam.transform.translation.x = 0.09;
+        tf_cam.transform.translation.y = 0.0;
+        tf_cam.transform.translation.z = 0.02;
+
+        tf2::Quaternion q_z, q_x, q_base;
+        q_z.setRPY(0.0, 0.0, -M_PI_2);
+        q_x.setRPY(0.0, M_PI_2, 0.0);
+        q_base = q_x * q_z;
+
+        tf2::Quaternion q_pitch;
+        q_pitch.setRPY(pitch_angle, 0.0, 0.0);
+        tf2::Quaternion q_total = q_base * q_pitch;
+        q_total.normalize();
+
+        tf_cam.transform.rotation.x = q_total.x();
+        tf_cam.transform.rotation.y = q_total.y();
+        tf_cam.transform.rotation.z = q_total.z();
+        tf_cam.transform.rotation.w = q_total.w();
+        tf_broadcaster_->sendTransform(tf_cam);
+    }
+
+    void odom_callback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        tf2::Quaternion q_drone(
+            msg->pose.pose.orientation.x,
+            msg->pose.pose.orientation.y,
+            msg->pose.pose.orientation.z,
+            msg->pose.pose.orientation.w);
+        double roll, pitch, yaw;
+        tf2::Matrix3x3(q_drone).getRPY(roll, pitch, yaw);
+        double gimbal_max = gimbal_abs_max_ - current_pitch_;
+        double gimbal_min = gimbal_abs_min_ - current_pitch_;
+        double limited_pitch = std::clamp(pitch, gimbal_min, gimbal_max);
+
+        tf2::Quaternion q_pitch_comp, q_roll_comp, q_total_comp;
+        q_pitch_comp.setRPY(limited_pitch, 0.0, 0.0);
+        q_roll_comp.setRPY(0.0, 0.0, -roll);
+        q_total_comp = q_roll_comp * q_pitch_comp;
+        q_total_comp.normalize();
+
+        geometry_msgs::msg::TransformStamped tf_gimbal;
+        tf_gimbal.header.stamp = this->get_clock()->now();
+        tf_gimbal.header.frame_id = "camera_link";
+        tf_gimbal.child_frame_id = "camera_gimbal";
+        tf_gimbal.transform.rotation.x = q_total_comp.x();
+        tf_gimbal.transform.rotation.y = q_total_comp.y();
+        tf_gimbal.transform.rotation.z = q_total_comp.z();
+        tf_gimbal.transform.rotation.w = q_total_comp.w();
+        tf_broadcaster_->sendTransform(tf_gimbal);
+    }
+
+    double min_pitch_, max_pitch_;
+    double min_pitch_deg_, max_pitch_deg_;
+    double current_pitch_, target_pitch_;
+    double angular_speed_, delay_before_move_;
+    double tilt_offset_;
+    double gimbal_abs_max_, gimbal_abs_min_;
+    bool waiting_, moving_;
+    rclcpp::Time last_update_time_, wait_start_time_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
+    rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr sub_move_camera_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
-
-    // Estados
-    double tilt_target_, pan_target_;
-    double tilt_current_, pan_current_;
-    double delay_timer_;
 };
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    rclcpp::spin(std::make_shared<CameraTFController>());
+    rclcpp::spin(std::make_shared<CameraTFWithGimbal>());
     rclcpp::shutdown();
     return 0;
 }

@@ -1,3 +1,7 @@
+// AprilTagNode: ROS2 node that captures live video, detects AprilTags using OpenCV and AprilTag 3, 
+// estimates each tag’s 3D pose and orientation, draws tag outlines and axes, and displays FPS in real time.
+// Author: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), in collaboration with UFV.
+
 #include <rclcpp/rclcpp.hpp>
 #include <opencv2/opencv.hpp>
 #include <apriltag/apriltag.h>
@@ -15,26 +19,22 @@ public:
             return;
         }
 
-        // Detector
         tf_ = tag36h11_create();
         td_ = apriltag_detector_create();
         apriltag_detector_add_family(td_, tf_);
 
-        // Camera intrinsics
         cameraMatrix_ = (cv::Mat1d(3,3) << 1296.0, 0, 679.1841,
                                            0, 1297.8, 352.7879,
                                            0, 0, 1);
         distCoeffs_ = (cv::Mat1d(1,5) << -0.1501, -0.1480, 0, 0, 0);
 
-        tag_size_ = 0.12; // meters
+        tag_size_ = 0.12;
 
-        // Timer loop 30Hz
         timer_ = this->create_wall_timer(
             std::chrono::milliseconds(33),
             std::bind(&AprilTagNode::process_frame, this)
         );
 
-        // Inicializar variables para FPS
         last_time_ = std::chrono::steady_clock::now();
         frame_count_ = 0;
         fps_ = 0.0;
@@ -53,7 +53,6 @@ private:
         cap_ >> frame;
         if (frame.empty()) return;
 
-        // ---- Calcular FPS ----
         frame_count_++;
         auto now = std::chrono::steady_clock::now();
         double elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_time_).count();
@@ -64,11 +63,9 @@ private:
             frame_count_ = 0;
             last_time_ = now;
         }
-        // ----------------------
 
         cv::Mat gray;
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
-
         image_u8_t im = { gray.cols, gray.rows, gray.cols, gray.data };
         zarray_t* detections = apriltag_detector_detect(td_, &im);
 
@@ -113,7 +110,6 @@ private:
             }
 
             double dist = cv::norm(tvec);
-
             RCLCPP_INFO(this->get_logger(),
                         "Tag %d: Pos [%.3f, %.3f, %.3f] m, Dist=%.2f m, Euler [R=%.2f, P=%.2f, Y=%.2f deg]",
                         det->id,
@@ -133,14 +129,13 @@ private:
             std::vector<cv::Point2f> imgpts;
             cv::projectPoints(axisPoints, rvec, tvec, cameraMatrix_, distCoeffs_, imgpts);
 
-            cv::line(frame, imgpts[0], imgpts[1], {255,0,0}, 3); // X blue
-            cv::line(frame, imgpts[0], imgpts[2], {0,255,0}, 3); // Y green
-            cv::line(frame, imgpts[0], imgpts[3], {0,0,255}, 3); // Z red
+            cv::line(frame, imgpts[0], imgpts[1], {255,0,0}, 3);
+            cv::line(frame, imgpts[0], imgpts[2], {0,255,0}, 3);
+            cv::line(frame, imgpts[0], imgpts[3], {0,0,255}, 3);
         }
 
         apriltag_detections_destroy(detections);
 
-        // Mostrar FPS en la ventana
         cv::putText(frame, "FPS: " + std::to_string(fps_), {10,30},
                     cv::FONT_HERSHEY_SIMPLEX, 1.0, {255,255,0}, 2);
 
@@ -152,12 +147,9 @@ private:
     apriltag_family_t *tf_;
     apriltag_detector_t *td_;
     rclcpp::TimerBase::SharedPtr timer_;
-
     cv::Mat cameraMatrix_;
     cv::Mat distCoeffs_;
     double tag_size_;
-
-    // Variables para medir FPS
     std::chrono::steady_clock::time_point last_time_;
     int frame_count_;
     double fps_;
