@@ -14,6 +14,9 @@ find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+
 
 # ---------------- Includes ----------------
 include_directories(
@@ -43,7 +46,7 @@ ament_target_dependencies(beboptag rclcpp sensor_msgs cv_bridge OpenCV)
 target_link_libraries(beboptag apriltag ${OpenCV_LIBS})
 
 add_executable(tf_cam src/tf_cam.cpp)
-ament_target_dependencies(tf_cam rclcpp tf2 tf2_ros geometry_msgs nav_msgs)
+ament_target_dependencies(tf_cam rclcpp tf2 tf2_ros geometry_msgs nav_msgs std_msgs)
 
 add_executable(tf_tag_bebop src/tf_tag_bebop.cpp)
 ament_target_dependencies(tf_tag_bebop rclcpp sensor_msgs cv_bridge OpenCV tf2_ros geometry_msgs)
@@ -78,6 +81,7 @@ ament_target_dependencies(tagfollow
   std_msgs
   tf2
   tf2_ros
+  visualization_msgs
 )
 add_executable(visual src/visual.cpp)
 ament_target_dependencies(visual
@@ -86,6 +90,50 @@ ament_target_dependencies(visual
   visualization_msgs
   tf2_ros
 )
+
+add_executable(inverse_dynamic_controller src/InverseDynamicController.cpp)
+ament_target_dependencies(inverse_dynamic_controller
+  rclcpp
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  Eigen3
+)
+
+add_executable(poseref src/poseref.cpp)
+ament_target_dependencies(poseref
+  rclcpp
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+add_executable(safety_watchdog
+  src/safe_watchdog.cpp
+)
+ament_target_dependencies(safety_watchdog
+  rclcpp
+  geometry_msgs
+  std_msgs
+)
+add_executable(position_control src/position_control.cpp)
+
+# Dependencias del ejecutable
+ament_target_dependencies(position_control
+  rclcpp
+  geometry_msgs
+  nav_msgs
+  std_msgs
+  visualization_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
 # ---------------- Install ----------------
 install(TARGETS
   hello_cpp
@@ -101,6 +149,10 @@ install(TARGETS
   velocity_logger
   tagfollow
   visual
+  inverse_dynamic_controller
+  poseref
+  safety_watchdog
+  position_control
   DESTINATION lib/${PROJECT_NAME}
 )
 

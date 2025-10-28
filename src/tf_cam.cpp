@@ -1,13 +1,12 @@
-// CameraTFWithGimbal: ROS2 node that publishes three TFs:
-// 1. base_link → absolute_cam_link (fixed tilt offset)
-// 2. base_link → camera_link (dynamic pitch motion at constant speed)
-// 3. camera_link → camera_gimbal (stabilized, roll-compensated, limited to absolute angles)
+// CameraTFWithGimbal: ROS2 node that publishes three TFs (base_link→absolute_cam_link, base_link→camera_link, camera_link→camera_gimbal) 
+// and a boolean topic /bebop/camera_moving that indicates when the camera is moving, waiting, or within 2 seconds after completing movement.
 // Author: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), in collaboration with UFV.
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_ros/transform_broadcaster.h>
@@ -26,6 +25,7 @@ public:
         sub_move_camera_ = this->create_subscription<geometry_msgs::msg::Vector3>(
             "/bebop/move_camera", 10,
             std::bind(&CameraTFWithGimbal::move_camera_callback, this, std::placeholders::_1));
+        pub_camera_moving_ = this->create_publisher<std_msgs::msg::Bool>("/bebop/camera_moving", 10);
         timer_ = this->create_wall_timer(20ms, std::bind(&CameraTFWithGimbal::update_camera_pitch, this));
 
         min_pitch_deg_ = -90.0;
@@ -41,6 +41,8 @@ public:
         target_pitch_ = 0.0;
         waiting_ = false;
         moving_ = false;
+        extra_publish_duration_ = 2.0;
+        movement_end_time_ = this->now();
         last_update_time_ = this->now();
         wait_start_time_ = this->now();
     }
@@ -50,7 +52,7 @@ private:
         double target_deg = std::clamp(msg->x, min_pitch_deg_, max_pitch_deg_);
         target_pitch_ = target_deg * M_PI / 180.0;
         waiting_ = true;
-        moving_ = false;
+        moving_ = true;
         wait_start_time_ = this->now();
     }
 
@@ -62,10 +64,10 @@ private:
         if (waiting_) {
             if ((now - wait_start_time_).seconds() >= delay_before_move_) {
                 waiting_ = false;
-                moving_ = true;
             } else {
                 publish_absolute_tf();
                 publish_camera_tf(current_pitch_);
+                publish_camera_moving(true);
                 return;
             }
         }
@@ -77,13 +79,22 @@ private:
             if (std::fabs(error) <= std::fabs(delta)) {
                 current_pitch_ = target_pitch_;
                 moving_ = false;
+                movement_end_time_ = now;
             } else {
                 current_pitch_ += delta;
             }
         }
 
+        bool is_moving = waiting_ || moving_ || (now - movement_end_time_).seconds() < extra_publish_duration_;
         publish_absolute_tf();
         publish_camera_tf(current_pitch_);
+        publish_camera_moving(is_moving);
+    }
+
+    void publish_camera_moving(bool is_moving) {
+        std_msgs::msg::Bool msg;
+        msg.data = is_moving;
+        pub_camera_moving_->publish(msg);
     }
 
     void publish_absolute_tf() {
@@ -144,6 +155,7 @@ private:
             msg->pose.pose.orientation.w);
         double roll, pitch, yaw;
         tf2::Matrix3x3(q_drone).getRPY(roll, pitch, yaw);
+
         double gimbal_max = gimbal_abs_max_ - current_pitch_;
         double gimbal_min = gimbal_abs_min_ - current_pitch_;
         double limited_pitch = std::clamp(pitch, gimbal_min, gimbal_max);
@@ -172,10 +184,13 @@ private:
     double tilt_offset_;
     double gimbal_abs_max_, gimbal_abs_min_;
     bool waiting_, moving_;
+    double extra_publish_duration_;
+    rclcpp::Time movement_end_time_;
     rclcpp::Time last_update_time_, wait_start_time_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_odom_;
     rclcpp::Subscription<geometry_msgs::msg::Vector3>::SharedPtr sub_move_camera_;
     std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_camera_moving_;
     rclcpp::TimerBase::SharedPtr timer_;
 };
 

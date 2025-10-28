@@ -21,7 +21,13 @@ def generate_launch_description():
             executable='tf_tag_bebop',
             name='tf_tag_bebop',
             output='screen'
-        ),        
+        ),
+        Node(
+            package='nero_drone',
+            executable='safety_watchdog',
+            name='safety_watchdog',
+            output='screen'
+        ),         
 
         # --- Robot State Publisher ---
         Node(
