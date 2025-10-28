@@ -1,7 +1,7 @@
 // DroneForceVisualizerXYZ: ROS2 node that subscribes to /bebop/camera_moving and /bebop/detected,
 // computes 3D forces (Fx, Fy, Fz) using a PID controller from the transform base_link→tag_0,
 // visualizes them as an arrow marker in RViz, and publishes the same forces as velocity commands
-// on /bebop/cmd_vel, limited to ±1.0 m/s at 50 Hz.
+// on /bebop/cmd_vel, limited to ±1.0 m/s at 20 Hz.
 // Author: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), in collaboration with UFV.
 
 #include <rclcpp/rclcpp.hpp>
@@ -26,7 +26,8 @@ public:
     tf_buffer_(this->get_clock()),
     tf_listener_(tf_buffer_),
     camera_moving_(false),
-    tag_detected_(false)
+    tag_detected_(false),
+    iter_count_(0)
   {
     marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("drone_force_marker", 10);
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/bebop/cmd_vel", 10);
@@ -39,15 +40,15 @@ public:
       std::bind(&DroneForceVisualizerXYZ::tagDetectedCallback, this, std::placeholders::_1));
 
     // Parámetros PID
-    this->declare_parameter("k_x", 0.5);
-    this->declare_parameter("k_y", 0.5);
-    this->declare_parameter("k_z", 0.5);
-    this->declare_parameter("kd_x", 0.18);
-    this->declare_parameter("kd_y", 0.18);
-    this->declare_parameter("kd_z", 0.18);
-    this->declare_parameter("ki_x", 0.0);
-    this->declare_parameter("ki_y", 0.0);
-    this->declare_parameter("ki_z", 0.0);
+    this->declare_parameter("k_x", 0.0);
+    this->declare_parameter("k_y", 1.4);
+    this->declare_parameter("k_z", 0.0);
+    this->declare_parameter("kd_x", 0.00);
+    this->declare_parameter("kd_y", 0.20);
+    this->declare_parameter("kd_z", 0.00);
+    this->declare_parameter("ki_x", 0.000000);
+    this->declare_parameter("ki_y", 0.2);
+    this->declare_parameter("ki_z", 0.000000);
     this->declare_parameter("desired_distance", 2.5);
     this->declare_parameter("z_ref_offset", 0.3);
     this->declare_parameter("force_scale", 1.0);
@@ -67,11 +68,12 @@ public:
     this->get_parameter("force_scale", scale_);
     this->get_parameter("max_vel", max_vel_);
 
-    dt_ = 0.05;  // 50 Hz
+    dt_ = 0.05;  // 20 Hz
     ex_prev_ = ey_prev_ = ez_prev_ = 0.0;
-    ix_ = iy_ = iz_ = 0.0;  // acumuladores integrales
+    ix_ = iy_ = iz_ = 0.0;
 
-    timer_ = this->create_wall_timer(20ms, std::bind(&DroneForceVisualizerXYZ::updateLoop, this));
+    // Control loop at 20 Hz
+    timer_ = this->create_wall_timer(50ms, std::bind(&DroneForceVisualizerXYZ::updateLoop, this));
   }
 
 private:
@@ -109,17 +111,21 @@ private:
       double dey = (ey - ey_prev_) / dt_;
       double dez = (ez - ez_prev_) / dt_;
 
-      // Actualización de integrales (anti-windup limitado)
-      ix_ += ex * dt_;
-      iy_ += ey * dt_;
-      iz_ += ez * dt_;
+      // === Integrador cada 4 iteraciones (5 Hz) ===
+      iter_count_++;
+      if (iter_count_ % 4 == 0) {
+        double dt_int = dt_ * 4.0;  // periodo efectivo de integración (0.2 s)
+        ix_ += ex * dt_int;
+        iy_ += ey * dt_int;
+        iz_ += ez * dt_int;
 
-      const double i_limit = max_vel_ / std::max({kix_, kiy_, kiz_, 1e-6});
-      ix_ = std::clamp(ix_, -i_limit, i_limit);
-      iy_ = std::clamp(iy_, -i_limit, i_limit);
-      iz_ = std::clamp(iz_, -i_limit, i_limit);
+        const double i_limit = max_vel_ / std::max({kix_, kiy_, kiz_, 1e-6});
+        ix_ = std::clamp(ix_, -i_limit, i_limit);
+        iy_ = std::clamp(iy_, -i_limit, i_limit);
+        iz_ = std::clamp(iz_, -i_limit, i_limit);
+      }
 
-      // Control PID
+      // === Control PID ===
       Fx = kx_ * ex + kdx_ * dex + kix_ * ix_;
       Fy = ky_ * ey + kdy_ * dey + kiy_ * iy_;
       Fz = kz_ * ez + kdz_ * dez + kiz_ * iz_;
@@ -161,7 +167,7 @@ private:
     arrow.pose.position.y = 0.0;
     arrow.pose.position.z = 0.0;
 
-    double magnitude = std::sqrt(Fx*Fx + Fy*Fy + Fz*Fz) * scale_;
+    double magnitude = std::sqrt(Fx * Fx + Fy * Fy + Fz * Fz) * scale_;
     arrow.scale.x = magnitude;
     arrow.scale.y = 0.04;
     arrow.scale.z = 0.04;
@@ -194,6 +200,7 @@ private:
 
   void resetIntegrators() {
     ix_ = iy_ = iz_ = 0.0;
+    iter_count_ = 0;
   }
 
   // ROS interfaces
@@ -212,6 +219,7 @@ private:
   double d_ref_, z_ref_, scale_, max_vel_;
   double ex_prev_, ey_prev_, ez_prev_, dt_;
   double ix_, iy_, iz_;
+  int iter_count_;  // contador para integrador
 
   // Estado
   bool camera_moving_;
