@@ -1,8 +1,3 @@
-// SafetyWatchdogROS2
-// Autor: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), 2025
-// Nodo de seguridad con lógica de vuelo: publica cero si no se reciben cmd_vel a 10 Hz,
-// pero sólo cuando el dron está en vuelo (tras /bebop/takeoff) y sin /bebop/land activo.
-
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/empty.hpp>
@@ -15,16 +10,14 @@ public:
   SafetyWatchdog()
   : Node("safety_watchdog"),
     last_cmd_time_(this->now()),
-    timeout_(0.1),
-    in_flight_(false),
-    has_received_cmd_(false)
+    timeout_(0.4),
+    stopped_(false),
+    flying_(false),
+    recovered_(false)
   {
-    // --- Publishers ---
-    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/bebop/cmd_vel", 10);
-
-    // --- Subscribers ---
+    // --- Suscripciones ---
     sub_cmd_ = this->create_subscription<geometry_msgs::msg::Twist>(
-      "/bebop/cmd_vel", 10,
+      "/safe_bebop/cmd_vel", 10,
       std::bind(&SafetyWatchdog::cmdCallback, this, std::placeholders::_1));
 
     sub_takeoff_ = this->create_subscription<std_msgs::msg::Empty>(
@@ -35,43 +28,72 @@ public:
       "/bebop/land", 10,
       std::bind(&SafetyWatchdog::landCallback, this, std::placeholders::_1));
 
-    // --- Timer ---
-    timer_ = this->create_wall_timer(20ms, std::bind(&SafetyWatchdog::checkTimeout, this));
+    // --- Publicador ---
+    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/bebop/cmd_vel", 10);
 
-    RCLCPP_INFO(this->get_logger(), "Safety Watchdog initialized (timeout = %.2f s)", timeout_);
+    // --- Timer de vigilancia ---
+    timer_ = this->create_wall_timer(40ms, std::bind(&SafetyWatchdog::checkTimeout, this));
+
+    RCLCPP_INFO(this->get_logger(),
+                "SafetyWatchdog iniciado (timeout = %.2f s). Esperando /bebop/takeoff para activarse.",
+                timeout_);
   }
 
 private:
-  // --- Callbacks ---
-  void cmdCallback(const geometry_msgs::msg::Twist::SharedPtr /*msg*/) {
+  // === CALLBACKS ===
+  void takeoffCallback(const std_msgs::msg::Empty::SharedPtr) {
+    flying_ = true;
+    stopped_ = false;
+    recovered_ = false;
     last_cmd_time_ = this->now();
-    has_received_cmd_ = true;
+    RCLCPP_INFO(this->get_logger(), "Takeoff detectado — watchdog activado.");
   }
 
-  void takeoffCallback(const std_msgs::msg::Empty::SharedPtr /*msg*/) {
-    in_flight_ = true;
-    has_received_cmd_ = false;  // reset when takeoff starts
-    RCLCPP_INFO(this->get_logger(), "Takeoff detected — watchdog active");
+  void landCallback(const std_msgs::msg::Empty::SharedPtr) {
+    flying_ = false;
+    stopped_ = false;
+    recovered_ = false;
+    publishZero();
+    RCLCPP_INFO(this->get_logger(), "Land detectado — watchdog desactivado.");
   }
 
-  void landCallback(const std_msgs::msg::Empty::SharedPtr /*msg*/) {
-    in_flight_ = false;
-    publishZero();  // ensure stop at landing
-    RCLCPP_INFO(this->get_logger(), "Landing detected — watchdog disabled");
+  void cmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+    if (!flying_) return;  // ignora si no está volando
+
+    last_cmd_time_ = this->now();
+
+    // Si estaba detenido por timeout y ahora volvió a recibir comandos
+    if (stopped_) {
+      stopped_ = false;
+      recovered_ = true;
+      RCLCPP_INFO(this->get_logger(), "Comandos restaurados — watchdog reactivado.");
+    } else {
+      recovered_ = false;
+    }
+
+    cmd_pub_->publish(*msg);
   }
 
+  // === FUNCIÓN DE MONITOREO ===
   void checkTimeout() {
-    if (!in_flight_ || !has_received_cmd_)
-      return;  // do nothing if not flying or no cmd yet
+    if (!flying_) return;
 
     double elapsed = (this->now() - last_cmd_time_).seconds();
+
     if (elapsed > timeout_) {
-      publishZero();
-      RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
-                           "Timeout: no cmd_vel received for %.3f s — sending STOP", elapsed);
+      if (!stopped_) {
+        publishZero();
+        stopped_ = true;
+        recovered_ = false;
+        RCLCPP_WARN(this->get_logger(),
+                    "Timeout: no cmd_vel recibido por %.3f s → enviando STOP", elapsed);
+      } else {
+        publishZero();  // sigue enviando stop
+      }
     }
   }
 
+  // === FUNCIONES AUXILIARES ===
   void publishZero() {
     geometry_msgs::msg::Twist stop;
     stop.linear.x = stop.linear.y = stop.linear.z = stop.angular.z = 0.0;
@@ -79,17 +101,18 @@ private:
   }
 
   // --- ROS interfaces ---
-  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_;
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr sub_takeoff_;
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr sub_land_;
+  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   // --- Estado interno ---
   rclcpp::Time last_cmd_time_;
   double timeout_;
-  bool in_flight_;
-  bool has_received_cmd_;
+  bool stopped_;
+  bool flying_;
+  bool recovered_;
 };
 
 int main(int argc, char **argv) {

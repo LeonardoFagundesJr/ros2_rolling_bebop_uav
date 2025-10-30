@@ -1,14 +1,12 @@
-// DroneForceVisualizerXYZ: ROS2 node that subscribes to /bebop/camera_moving and /bebop/detected,
-// computes 3D forces (Fx, Fy, Fz) using a PID controller from the transform base_link→tag_0,
-// visualizes them as an arrow marker in RViz, and publishes the same forces as velocity commands
-// on /bebop/cmd_vel, limited to ±1.0 m/s at 20 Hz.
-// Author: Brayan Saldarriaga-Mesa (bsaldarriaga@inaut.unsj.edu.ar), in collaboration with UFV.
+// DroneForceVisualizerXYZ: PID con Kp variable mediante tangente hiperbólica
+// Autor: Brayan Saldarriaga-Mesa (UFV collaboration)
 
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/float64_multi_array.hpp>
 #include <tf2_ros/transform_listener.h>
 #include <tf2_ros/buffer.h>
 #include <tf2/exceptions.h>
@@ -26,63 +24,102 @@ public:
     tf_buffer_(this->get_clock()),
     tf_listener_(tf_buffer_),
     camera_moving_(false),
-    tag_detected_(false),
-    iter_count_(0)
+    tag_detected_(false)
   {
-    marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("drone_force_marker", 10);
-    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/bebop/cmd_vel", 10);
+    // --- Publishers ---
+    marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("drone_force_marker", 2);
+    cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/safe_bebop/cmd_vel", 2);
 
+    // --- Subscribers ---
     sub_camera_moving_ = this->create_subscription<std_msgs::msg::Bool>(
-      "/bebop/camera_moving", 10,
+      "/bebop/camera_moving", 2,
       std::bind(&DroneForceVisualizerXYZ::cameraMovingCallback, this, std::placeholders::_1));
+
     sub_tag_detected_ = this->create_subscription<std_msgs::msg::Bool>(
-      "/bebop/detected", 10,
+      "/bebop/detected", 2,
       std::bind(&DroneForceVisualizerXYZ::tagDetectedCallback, this, std::placeholders::_1));
 
-    // Parámetros PID
-    this->declare_parameter("k_x", 0.0);
-    this->declare_parameter("k_y", 1.4);
-    this->declare_parameter("k_z", 0.0);
-    this->declare_parameter("kd_x", 0.00);
-    this->declare_parameter("kd_y", 0.20);
-    this->declare_parameter("kd_z", 0.00);
-    this->declare_parameter("ki_x", 0.000000);
-    this->declare_parameter("ki_y", 0.2);
-    this->declare_parameter("ki_z", 0.000000);
-    this->declare_parameter("desired_distance", 2.5);
-    this->declare_parameter("z_ref_offset", 0.3);
-    this->declare_parameter("force_scale", 1.0);
-    this->declare_parameter("max_vel", 1.0);
+    sub_pid_gains_ = this->create_subscription<std_msgs::msg::Float64MultiArray>(
+      "/drone/pid_gains", 1,
+      std::bind(&DroneForceVisualizerXYZ::pidGainsCallback, this, std::placeholders::_1));
 
-    this->get_parameter("k_x", kx_);
-    this->get_parameter("k_y", ky_);
-    this->get_parameter("k_z", kz_);
-    this->get_parameter("kd_x", kdx_);
-    this->get_parameter("kd_y", kdy_);
-    this->get_parameter("kd_z", kdz_);
-    this->get_parameter("ki_x", kix_);
-    this->get_parameter("ki_y", kiy_);
-    this->get_parameter("ki_z", kiz_);
+    // --- Parámetros ---
+    this->declare_parameter("desired_distance", 2.0);
+    this->declare_parameter("z_ref_offset", 0.3);
+    this->declare_parameter("force_scale", 3.0);
+    this->declare_parameter("max_vel", 1.0);
+    this->declare_parameter("transition_error", 0.5);
+    this->declare_parameter("alpha", 6.0);
+
     this->get_parameter("desired_distance", d_ref_);
     this->get_parameter("z_ref_offset", z_ref_);
     this->get_parameter("force_scale", scale_);
     this->get_parameter("max_vel", max_vel_);
+    this->get_parameter("transition_error", e_transition_);
+    this->get_parameter("alpha", alpha_);
 
-    dt_ = 0.05;  // 20 Hz
+    // --- Inicialización PID ---
+    Kp1x_ = Kp1y_ = Kp1z_ = 0.0;
+    Kp2x_ = Kp2y_ = Kp2z_ = 0.0;
+    kdx_  = kdy_  = kdz_  = 0.0;
+    kix_  = kiy_  = kiz_  = 0.0;
+
+    dt_ = 1.0 / 30.0;  // 30 Hz
     ex_prev_ = ey_prev_ = ez_prev_ = 0.0;
     ix_ = iy_ = iz_ = 0.0;
 
-    // Control loop at 20 Hz
-    timer_ = this->create_wall_timer(50ms, std::bind(&DroneForceVisualizerXYZ::updateLoop, this));
+    timer_ = this->create_wall_timer(33ms, std::bind(&DroneForceVisualizerXYZ::updateLoop, this));
+
+    RCLCPP_INFO(this->get_logger(),
+      "DroneForceVisualizerXYZ iniciado: Kp tanh(alpha=%.1f), salida /safe_bebop/cmd_vel @30 Hz", alpha_);
+  }
+
+  void publishZeroOutputs() {
+    geometry_msgs::msg::Twist zero_cmd;
+    zero_cmd.linear.x = zero_cmd.linear.y = zero_cmd.linear.z = zero_cmd.angular.z = 0.0;
+    cmd_pub_->publish(zero_cmd);
+
+    visualization_msgs::msg::Marker zero_marker;
+    zero_marker.header.frame_id = "base_link";
+    zero_marker.header.stamp = now();
+    zero_marker.ns = "drone_force_xyz";
+    zero_marker.id = 1;
+    zero_marker.type = visualization_msgs::msg::Marker::ARROW;
+    zero_marker.action = visualization_msgs::msg::Marker::ADD;
+    zero_marker.scale.x = 0.0;
+    zero_marker.scale.y = 0.4;
+    zero_marker.scale.z = 0.0;
+    zero_marker.color.a = 0.0;
+    marker_pub_->publish(zero_marker);
   }
 
 private:
-  void cameraMovingCallback(const std_msgs::msg::Bool::SharedPtr msg) {
-    camera_moving_ = msg->data;
+  // --- Callbacks de suscriptores ---
+  void cameraMovingCallback(const std_msgs::msg::Bool::SharedPtr msg) { camera_moving_ = msg->data; }
+  void tagDetectedCallback(const std_msgs::msg::Bool::SharedPtr msg) { tag_detected_ = msg->data; }
+
+  // Recibe [Kp1x,Kp1y,Kp1z, Kp2x,Kp2y,Kp2z, Kdx,Kdy,Kdz, Kix,Kiy,Kiz]
+  void pidGainsCallback(const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+    if (msg->data.size() < 12) {
+      RCLCPP_WARN(this->get_logger(), "PID gains message must have 12 values");
+      return;
+    }
+
+    Kp1x_ = msg->data[0]; Kp1y_ = msg->data[1]; Kp1z_ = msg->data[2];
+    Kp2x_ = msg->data[3]; Kp2y_ = msg->data[4]; Kp2z_ = msg->data[5];
+    kdx_  = msg->data[6]; kdy_  = msg->data[7]; kdz_  = msg->data[8];
+    kix_  = msg->data[9]; kiy_  = msg->data[10]; kiz_ = msg->data[11];
+
+    RCLCPP_INFO(this->get_logger(),
+      "PID updated: Kp1=(%.2f,%.2f,%.2f)  Kp2=(%.2f,%.2f,%.2f)  Kd=(%.2f,%.2f,%.2f)  Ki=(%.2f,%.2f,%.2f)",
+      Kp1x_, Kp1y_, Kp1z_, Kp2x_, Kp2y_, Kp2z_, kdx_, kdy_, kdz_, kix_, kiy_, kiz_);
   }
 
-  void tagDetectedCallback(const std_msgs::msg::Bool::SharedPtr msg) {
-    tag_detected_ = msg->data;
+  // --- Función de ganancia variable con tanh ---
+  double variableGain(double error, double Kp_low, double Kp_high) {
+    double e = std::abs(error);
+    double blend = 0.3 * (1.0 - std::tanh(alpha_ * (e - e_transition_)));
+    return Kp_low + (Kp_high - Kp_low) * blend;
   }
 
   void updateLoop() {
@@ -111,29 +148,54 @@ private:
       double dey = (ey - ey_prev_) / dt_;
       double dez = (ez - ez_prev_) / dt_;
 
-      // === Integrador cada 4 iteraciones (5 Hz) ===
-      iter_count_++;
-      if (iter_count_ % 4 == 0) {
-        double dt_int = dt_ * 4.0;  // periodo efectivo de integración (0.2 s)
-        ix_ += ex * dt_int;
-        iy_ += ey * dt_int;
-        iz_ += ez * dt_int;
+      // --- Ganancia proporcional variable (tanh) ---
+      double Kpx = variableGain(ex, Kp1x_, Kp2x_);
+      double Kpy = variableGain(ey, Kp1y_, Kp2y_);
+      double Kpz = variableGain(ez, Kp1z_, Kp2z_);
 
-        const double i_limit = max_vel_ / std::max({kix_, kiy_, kiz_, 1e-6});
-        ix_ = std::clamp(ix_, -i_limit, i_limit);
-        iy_ = std::clamp(iy_, -i_limit, i_limit);
-        iz_ = std::clamp(iz_, -i_limit, i_limit);
+      Fx = Kpx * ex;
+      Fy = Kpy * ey;
+      Fz = Kpz * ez;
+
+      if (std::abs(ex) < 0.3) {
+        dex = (ex - ex_prev_) / dt_;
+        Fx += kdx_ * dex;
+      } else {
+        dex = 0.0;
+        ex_prev_ = ex;  // reinicia referencia
       }
 
-      // === Control PID ===
-      Fx = kx_ * ex + kdx_ * dex + kix_ * ix_;
-      Fy = ky_ * ey + kdy_ * dey + kiy_ * iy_;
-      Fz = kz_ * ez + kdz_ * dez + kiz_ * iz_;
+      if (std::abs(ey) < 0.3) {
+        dey = (ey - ey_prev_) / dt_;
+        Fy += kdy_ * dey;
+      } else {
+        dey = 0.0;
+        ey_prev_ = ey;
+      }
 
-      ex_prev_ = ex;
-      ey_prev_ = ey;
-      ez_prev_ = ez;
+      if (std::abs(ez) < 0.3) {
+        dez = (ez - ez_prev_) / dt_;
+        Fz += kdz_ * dez;
+      } else {
+        dez = 0.0;
+        ez_prev_ = ez;
+      }
 
+      // --- Integrativo: solo en ±0.1 m ---
+      if (std::abs(ex) < 0.1) ix_ += ex * dt_;
+      else ix_ = 0.0;
+
+      if (std::abs(ey) < 0.1) iy_ += ey * dt_;
+      else iy_ = 0.0;
+
+      if (std::abs(ez) < 0.1) iz_ += ez * dt_;
+      else iz_ = 0.0;
+
+      Fx += kix_ * ix_;
+      Fy += kiy_ * iy_;
+      Fz += kiz_ * iz_;
+
+      ex_prev_ = ex; ey_prev_ = ey; ez_prev_ = ez;
     } catch (tf2::TransformException &ex) {
       Fx = Fy = Fz = 0.0;
     }
@@ -163,9 +225,7 @@ private:
     arrow.id = 1;
     arrow.type = visualization_msgs::msg::Marker::ARROW;
     arrow.action = visualization_msgs::msg::Marker::ADD;
-    arrow.pose.position.x = 0.0;
-    arrow.pose.position.y = 0.0;
-    arrow.pose.position.z = 0.0;
+    arrow.pose.position.x = arrow.pose.position.y = arrow.pose.position.z = 0.0;
 
     double magnitude = std::sqrt(Fx * Fx + Fy * Fy + Fz * Fz) * scale_;
     arrow.scale.x = magnitude;
@@ -194,41 +254,42 @@ private:
     arrow.color.r = 1.0;
     arrow.color.g = 0.9;
     arrow.color.b = 0.1;
-
     marker_pub_->publish(arrow);
   }
 
-  void resetIntegrators() {
-    ix_ = iy_ = iz_ = 0.0;
-    iter_count_ = 0;
-  }
+  void resetIntegrators() { ix_ = iy_ = iz_ = 0.0; }
 
-  // ROS interfaces
+  // --- ROS interfaces ---
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_camera_moving_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_tag_detected_;
+  rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr sub_pid_gains_;
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
   rclcpp::TimerBase::SharedPtr timer_;
 
-  // Parámetros del controlador
-  double kx_, ky_, kz_;
+  // --- PID parámetros ---
+  double Kp1x_, Kp1y_, Kp1z_;
+  double Kp2x_, Kp2y_, Kp2z_;
   double kdx_, kdy_, kdz_;
   double kix_, kiy_, kiz_;
   double d_ref_, z_ref_, scale_, max_vel_;
+  double e_transition_, alpha_;
   double ex_prev_, ey_prev_, ez_prev_, dt_;
   double ix_, iy_, iz_;
-  int iter_count_;  // contador para integrador
-
-  // Estado
-  bool camera_moving_;
-  bool tag_detected_;
+  bool camera_moving_, tag_detected_;
 };
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<DroneForceVisualizerXYZ>());
+  auto node = std::make_shared<DroneForceVisualizerXYZ>();
+
+  try { rclcpp::spin(node); }
+  catch (const std::exception &e) { RCLCPP_ERROR(node->get_logger(), "Exception: %s", e.what()); }
+  catch (...) { RCLCPP_ERROR(node->get_logger(), "Unknown exception caught."); }
+
+  node->publishZeroOutputs();
   rclcpp::shutdown();
   return 0;
 }

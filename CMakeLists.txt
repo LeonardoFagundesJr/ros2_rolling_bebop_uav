@@ -94,10 +94,11 @@ ament_target_dependencies(visual
 add_executable(inverse_dynamic_controller src/InverseDynamicController.cpp)
 ament_target_dependencies(inverse_dynamic_controller
   rclcpp
-  geometry_msgs
   nav_msgs
+  geometry_msgs
   std_msgs
-  Eigen3
+  tf2
+  tf2_geometry_msgs
 )
 
 add_executable(poseref src/poseref.cpp)
@@ -133,6 +134,8 @@ ament_target_dependencies(position_control
   tf2_ros
   tf2_geometry_msgs
 )
+add_executable(safe_bebop_republisher src/bridge_cmd.cpp)
+ament_target_dependencies(safe_bebop_republisher rclcpp geometry_msgs)
 
 # ---------------- Install ----------------
 install(TARGETS
@@ -153,6 +156,7 @@ install(TARGETS
   poseref
   safety_watchdog
   position_control
+  safe_bebop_republisher
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -165,6 +169,7 @@ install(PROGRAMS
   nero_drone/demo_takeoff_land.py
   nero_drone/calibration_publish.py
   nero_drone/bebop_control_gui.py
+  nero_drone/pid_tunning.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
