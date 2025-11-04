@@ -49,7 +49,7 @@ add_executable(tf_cam src/tf_cam.cpp)
 ament_target_dependencies(tf_cam rclcpp tf2 tf2_ros geometry_msgs nav_msgs std_msgs)
 
 add_executable(tf_tag_bebop src/tf_tag_bebop.cpp)
-ament_target_dependencies(tf_tag_bebop rclcpp sensor_msgs cv_bridge OpenCV tf2_ros geometry_msgs)
+ament_target_dependencies(tf_tag_bebop rclcpp sensor_msgs cv_bridge OpenCV tf2_ros geometry_msgs visualization_msgs tf2 tf2_geometry_msgs)
 target_link_libraries(tf_tag_bebop apriltag ${OpenCV_LIBS})
 
 add_executable(VelToControlInput src/VelToControlInput.cpp)
@@ -66,10 +66,11 @@ ament_target_dependencies(RefPublisher rclcpp geometry_msgs)
 add_executable(velocity_logger src/velocity_logger.cpp)
 ament_target_dependencies(velocity_logger
   rclcpp
-  sensor_msgs
-  geometry_msgs
   nav_msgs
+  geometry_msgs
   std_msgs
+  tf2
+  tf2_geometry_msgs
 )
 
 add_executable(tagfollow src/tagfollow.cpp)
@@ -90,6 +91,8 @@ ament_target_dependencies(visual
   visualization_msgs
   tf2_ros
 )
+add_executable(land src/land.cpp)
+ament_target_dependencies(land rclcpp std_msgs)
 
 add_executable(inverse_dynamic_controller src/InverseDynamicController.cpp)
 ament_target_dependencies(inverse_dynamic_controller
@@ -99,7 +102,9 @@ ament_target_dependencies(inverse_dynamic_controller
   std_msgs
   tf2
   tf2_geometry_msgs
+  Eigen3
 )
+
 
 add_executable(poseref src/poseref.cpp)
 ament_target_dependencies(poseref
@@ -157,6 +162,7 @@ install(TARGETS
   safety_watchdog
   position_control
   safe_bebop_republisher
+  land
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -170,6 +176,8 @@ install(PROGRAMS
   nero_drone/calibration_publish.py
   nero_drone/bebop_control_gui.py
   nero_drone/pid_tunning.py
+  nero_drone/vrx.py
+  nero_drone/inv_vrx.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

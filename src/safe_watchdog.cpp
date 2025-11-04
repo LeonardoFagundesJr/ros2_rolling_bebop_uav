@@ -10,7 +10,7 @@ public:
   SafetyWatchdog()
   : Node("safety_watchdog"),
     last_cmd_time_(this->now()),
-    timeout_(0.4),
+    timeout_(0.2),
     stopped_(false),
     flying_(false),
     recovered_(false)
