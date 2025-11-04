@@ -73,6 +73,17 @@ ament_target_dependencies(velocity_logger
   tf2_geometry_msgs
 )
 
+# Ejecutable del nodo
+add_executable(ref_vec_filter src/filtred.cpp)
+
+# Vincular librerías ROS2
+ament_target_dependencies(ref_vec_filter
+  rclcpp
+  geometry_msgs
+  std_msgs
+  visualization_msgs
+)
+
 add_executable(tagfollow src/tagfollow.cpp)
 ament_target_dependencies(tagfollow
   rclcpp
@@ -163,6 +174,7 @@ install(TARGETS
   position_control
   safe_bebop_republisher
   land
+  ref_vec_filter
   DESTINATION lib/${PROJECT_NAME}
 )
 

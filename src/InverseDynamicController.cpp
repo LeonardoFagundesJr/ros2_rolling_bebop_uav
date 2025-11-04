@@ -238,10 +238,10 @@ public:
 
         Eigen::Vector4d Udw = (F * Ku).inverse() * (dUcw + Ksd * (Ucw - dX) + Kv * dX);
 
-        std::vector<double> k_max = {1.1, 1.1, 1.0, 1};
-        std::vector<double> k_min = {0.2, 0.2, 0.8, 1};
+        std::vector<double> k_max = {1.3, 1.3, 1.0, 1};
+        std::vector<double> k_min = {0.4, 0.4, 0.8, 1};
         std::vector<double> n_exp = {2.0, 2.0, 2.0, 2.0};
-        std::vector<double> e0    = {0.02, 0.02, 0.02, 0.02};
+        std::vector<double> e0    = {0.04, 0.04, 0.02, 0.02};
 
         Eigen::Vector4d Kdyn;
         for (int i = 0; i < 4; ++i)

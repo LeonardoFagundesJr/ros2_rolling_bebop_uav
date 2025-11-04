@@ -58,4 +58,11 @@ def generate_launch_description():
             name='bebop_control_gui',
             output='screen'
         ),
+
+        Node(
+            package='nero_drone',
+            executable='ref_vec_filter',
+            name='ref_vec_filter',
+            output='screen'
+        ),
     ])
