@@ -16,12 +16,6 @@ def generate_launch_description():
             name='tf_cam',
             output='screen'
         ),
-        Node(
-            package='nero_drone',
-            executable='tf_tag_bebop',
-            name='tf_tag_bebop',
-            output='screen'
-        ),
         
         Node(
             package='nero_drone',

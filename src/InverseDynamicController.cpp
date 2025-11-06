@@ -177,10 +177,17 @@ public:
 
         std::vector<double> g = gains;
         if (g.empty())
-            g = {2.0, 2.0, 3, 1.5,
-                 1.4, 1.4, 1.8, 1.0,
-                 2.3, 2.3, 1, 1.0};
-
+            g = {2.5, 2.5, 3, 1.5,
+                 1.0, 1.0, 1.8, 1.0,
+                 3.2, 3.2, 1, 1.0};
+            //position_ima
+            //g = {2.0, 2.0, 3, 1.5,
+            //     0.7, 0.7, 1.8, 1.0,
+            //     2.0, 2.0, 1, 1.0};     
+            //trajectori
+            //g = {2.0, 2.0, 3, 1.5,
+            //     1.4, 1.4, 1.8, 1.0,
+            //     2.3, 2.3, 1, 1.0};    
         Eigen::Matrix4d Ku = Eigen::Matrix4d::Zero();
         Eigen::Matrix4d Kv = Eigen::Matrix4d::Zero();
 
@@ -241,8 +248,8 @@ public:
         Eigen::Vector4d Xtil_body = F.transpose() * Xtil;
 
         // Parámetros de ganancia dinámica
-        std::vector<double> k_max = {0.24, 0.24, 1.0, 1.2};
-        std::vector<double> k_min = {0.21, 0.21, 1.0, 1.0};
+        std::vector<double> k_max = {3.0, 3.0, 1.0, 1.2};
+        std::vector<double> k_min = {0.8, 0.8, 1.0, 1.0};
         std::vector<double> n_exp = {2.0, 2.0, 2.0, 2.0};
         std::vector<double> e0    = {0.06, 0.06, 0.08, 0.03};
 
@@ -256,9 +263,19 @@ public:
         }
         Eigen::Matrix4d Kdyn = Kdyn_vec.asDiagonal();
 
-        // Aplicar Kdyn a las velocidades deseadas (Udw)
-        Udw = Kdyn * Udw;
+    
+        // Calcular la norma del error en el plano XY
+        double e_xy_norm = std::sqrt(
+            std::pow(Xtil_body[0], 2) + std::pow(Xtil_body[1], 2));
 
+    
+            if (e_xy_norm < 0.02)
+            {
+                // Si el error en el plano XY es menor que 2 cm, fuerza a cero
+                Kdyn_vec[0] = 0.0;
+                Kdyn_vec[1] = 0.0;
+            }
+        Udw = Kdyn * Udw;        
         // Guardar los comandos de control
         pSC.Ud[0] = Udw[0];
         pSC.Ud[1] = Udw[1];
@@ -274,7 +291,7 @@ public:
         geometry_msgs::msg::Twist cmd_sat;
         cmd_sat.linear.x  = std::clamp(pSC.Ud[0], -pPar.uSat[0], pPar.uSat[0]);
         cmd_sat.linear.y  = std::clamp(pSC.Ud[1], -pPar.uSat[1], pPar.uSat[1]);
-        cmd_sat.linear.z  = std::clamp(pSC.Ud[2], -pPar.uSat[2], pPar.uSat[2]);
+        cmd_sat.linear.z  = std::clamp(0.0, -pPar.uSat[2], pPar.uSat[2]);
         cmd_sat.angular.z = std::clamp(pSC.Ud[5], -pPar.uSat[5], pPar.uSat[5]);
 
         pubCmd->publish(cmd_sat);

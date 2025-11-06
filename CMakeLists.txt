@@ -37,7 +37,7 @@ ament_target_dependencies(beboptag rclcpp sensor_msgs cv_bridge OpenCV)
 target_link_libraries(beboptag apriltag ${OpenCV_LIBS})
 
 add_executable(tf_cam src/tf_cam.cpp)
-ament_target_dependencies(tf_cam rclcpp tf2 tf2_ros geometry_msgs nav_msgs std_msgs)
+ament_target_dependencies(tf_cam rclcpp tf2 tf2_ros geometry_msgs nav_msgs std_msgs tf2_geometry_msgs)
 
 add_executable(tf_tag_bebop src/tf_tag_bebop.cpp)
 ament_target_dependencies(tf_tag_bebop rclcpp sensor_msgs cv_bridge OpenCV tf2_ros geometry_msgs visualization_msgs tf2 tf2_geometry_msgs)
@@ -63,6 +63,8 @@ ament_target_dependencies(ref_vec_filter
   geometry_msgs
   std_msgs
   visualization_msgs
+  tf2_geometry_msgs
+
 )
 
 add_executable(tagfollow src/tagfollow.cpp)

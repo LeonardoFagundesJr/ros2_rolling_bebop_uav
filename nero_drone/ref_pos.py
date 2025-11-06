@@ -17,7 +17,7 @@ class RefPublisher(Node):
 
         # --------------------- Parámetros ---------------------
         self.dt = 1.0 / 30.0   # 30 Hz
-        self.hold_time = 8.0   # 8 segundos por pose
+        self.hold_time = 10.0   # 8 segundos por pose
         self.t0 = time.time()
         self.idx = 0           # Índice de punto actual
 
@@ -32,7 +32,7 @@ class RefPublisher(Node):
         ])
 
         # --------------------- Yaw asociados (en radianes) ---------------------
-        self.yaws = np.deg2rad([0, 0.54, 1.2, -1.5, 0.3])
+        self.yaws = np.deg2rad([0, 50, 150, 180, 210])
 
         self.get_logger().info(
             f"Publicando 5 poses fijas (8 s cada una) en cubo de {L} m con diferentes yaw"

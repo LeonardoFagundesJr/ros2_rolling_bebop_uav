@@ -9,6 +9,27 @@ def generate_launch_description():
     rviz_config = os.path.join(pkg_share, 'others', 'bebop2.rviz')
 
     return LaunchDescription([
+        # --- Calibration Publisher --
+        
+        Node(
+            package='nero_drone',
+            executable='isfly',
+            name='isfly',
+            output='screen',
+        ),
+        Node(
+            package='nero_drone',
+            executable='tf_cam',
+            name='tf_cam',
+            output='screen'
+        ),
+        Node(
+            package='nero_drone',
+            executable='tf_tag_bebop',
+            name='tf_tag_bebop',
+            output='screen'
+        ),              
+
         Node(
             package='nero_drone',
             executable='safety_watchdog',
@@ -23,15 +44,6 @@ def generate_launch_description():
             output='screen'
         ),
 
-
-        Node(
-            package='nero_drone',
-            executable='isfly',
-            name='isfly',
-            output='screen',
-        ),       
-
-
         Node(
             package='nero_drone',
             executable='inverse_dynamic_controller',
@@ -45,7 +57,6 @@ def generate_launch_description():
             name='bebop_control_gui',
             output='screen'
         ),
-
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -53,11 +64,17 @@ def generate_launch_description():
             output='screen',
             parameters=[{'robot_description': open(urdf_file).read()}]
         ),
-
-        Node(
+         Node(
             package='rviz2',
             executable='rviz2',
             arguments=['-d', rviz_config],
+            output='screen'
+        ),
+
+        Node(
+            package='nero_drone',
+            executable='ref_vec_filter',
+            name='ref_vec_filter',
             output='screen'
         ),
     ])
