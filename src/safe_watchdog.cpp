@@ -1,6 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <geometry_msgs/msg/twist.hpp>
-#include <std_msgs/msg/empty.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <chrono>
 
 using namespace std::chrono_literals;
@@ -20,41 +20,40 @@ public:
       "/safe_bebop/cmd_vel", 10,
       std::bind(&SafetyWatchdog::cmdCallback, this, std::placeholders::_1));
 
-    sub_takeoff_ = this->create_subscription<std_msgs::msg::Empty>(
-      "/bebop/takeoff", 10,
-      std::bind(&SafetyWatchdog::takeoffCallback, this, std::placeholders::_1));
+    // Nuevo: escucha estado booleano de vuelo
+    sub_is_flying_ = this->create_subscription<std_msgs::msg::Bool>(
+      "/bebop/is_flying", 10,
+      std::bind(&SafetyWatchdog::isFlyingCallback, this, std::placeholders::_1));
 
-    sub_land_ = this->create_subscription<std_msgs::msg::Empty>(
-      "/bebop/land", 10,
-      std::bind(&SafetyWatchdog::landCallback, this, std::placeholders::_1));
-
-    // --- Publicador ---
+    // Publicador de comandos finales
     cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/bebop/cmd_vel", 10);
-
-    // --- Timer de vigilancia ---
+    
+    // Timer de verificación
     timer_ = this->create_wall_timer(40ms, std::bind(&SafetyWatchdog::checkTimeout, this));
 
     RCLCPP_INFO(this->get_logger(),
-                "SafetyWatchdog iniciado (timeout = %.2f s). Esperando /bebop/takeoff para activarse.",
+                "SafetyWatchdog iniciado (timeout = %.2f s). Esperando flag /bebop/is_flying.",
                 timeout_);
   }
 
 private:
   // === CALLBACKS ===
-  void takeoffCallback(const std_msgs::msg::Empty::SharedPtr) {
-    flying_ = true;
-    stopped_ = false;
-    recovered_ = false;
-    last_cmd_time_ = this->now();
-    RCLCPP_INFO(this->get_logger(), "Takeoff detectado — watchdog activado.");
-  }
+  void isFlyingCallback(const std_msgs::msg::Bool::SharedPtr msg) {
+    bool prev = flying_;
+    flying_ = msg->data;
 
-  void landCallback(const std_msgs::msg::Empty::SharedPtr) {
-    flying_ = false;
-    stopped_ = false;
-    recovered_ = false;
-    publishZero();
-    RCLCPP_INFO(this->get_logger(), "Land detectado — watchdog desactivado.");
+    if (flying_ && !prev) {
+      RCLCPP_INFO(this->get_logger(), "Flag is_flying TRUE — watchdog activado.");
+      last_cmd_time_ = this->now();
+      stopped_ = false;
+      recovered_ = false;
+    }
+    else if (!flying_ && prev) {
+      RCLCPP_INFO(this->get_logger(), "Flag is_flying FALSE — watchdog desactivado.");
+      stopped_ = false;
+      recovered_ = false;
+      publishZero();
+    }
   }
 
   void cmdCallback(const geometry_msgs::msg::Twist::SharedPtr msg) {
@@ -102,8 +101,7 @@ private:
 
   // --- ROS interfaces ---
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_;
-  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr sub_takeoff_;
-  rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr sub_land_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_is_flying_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
@@ -115,6 +113,9 @@ private:
   bool recovered_;
 };
 
+// ============================================================================
+// MAIN
+// ============================================================================
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
   rclcpp::spin(std::make_shared<SafetyWatchdog>());

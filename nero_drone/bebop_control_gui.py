@@ -34,6 +34,9 @@ class BebopControlGUI(Node):
         self.root.title("Bebop Minimal Control Panel")
         self.root.configure(bg="#2C2C2C")
 
+        # Mantener ventana siempre al frente
+        self.root.attributes('-topmost', True)
+
         main_frame = tk.Frame(self.root, bg="#2C2C2C")
         main_frame.pack(padx=15, pady=15)
 
@@ -90,11 +93,21 @@ class BebopControlGUI(Node):
     # === LAND ===
     def land(self):
         self.status_label.config(text="Iniciando secuencia de aterrizaje...")
-        self.get_logger().info("Comando LAND publicado.")
+        self.get_logger().info("Comando LAND publicado (1/2).")
         self.pub_land.publish(Empty())
+
+        # Esperar 0.5 s y volver a enviar el comando LAND
+        self.root.after(500, self._repeat_land)
+
+        # Después de 5 segundos, restaurar la interfaz
         self.status_label.config(text="Aterrizando...")
         self.root.after(5000, self.reset_after_land)
 
+    def _repeat_land(self):
+        """Publica nuevamente el comando LAND después de 0.5 s."""
+        self.get_logger().info("Comando LAND publicado (2/2).")
+        self.pub_land.publish(Empty())
+        
     def reset_after_land(self):
         self.status_label.config(text="Aterrizaje completado. Listo para nuevo takeoff.")
         self.slider.set(-15)

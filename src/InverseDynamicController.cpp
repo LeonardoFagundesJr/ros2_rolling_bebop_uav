@@ -2,6 +2,7 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <std_msgs/msg/bool.hpp>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <Eigen/Dense>
@@ -43,7 +44,7 @@ class Bebop
 {
 public:
     explicit Bebop(rclcpp::Node *node)
-        : pNode(node), dt(1.0 / 30.0), ref_received(false)
+        : pNode(node), dt(1.0 / 10.0), ref_received(false), is_flying(false) // <-- 10 Hz
     {
         pPos.X.assign(4, 0.0);
         pPos.dX.assign(4, 0.0);
@@ -70,6 +71,10 @@ public:
         subRef = pNode->create_subscription<std_msgs::msg::Float64MultiArray>(
             "/bebop/ref_vec", 10,
             std::bind(&Bebop::refCallback, this, std::placeholders::_1));
+
+        subIsFlying = pNode->create_subscription<std_msgs::msg::Bool>(
+            "/bebop/is_flying", 10,
+            std::bind(&Bebop::isFlyingCallback, this, std::placeholders::_1));
 
         pubCmd = pNode->create_publisher<geometry_msgs::msg::Twist>(
             "/safe_bebop/cmd_vel", 10);
@@ -98,7 +103,6 @@ public:
             pPos.dXd[i] = msg->data[i + 4];
         }
 
-        // Calcular aceleración deseada (derivada discreta)
         if (!first_ref)
         {
             for (int i = 0; i < 4; ++i)
@@ -113,7 +117,11 @@ public:
         last_ref = msg->data;
     }
 
-    // ------------------------------------------------------------------------
+    void isFlyingCallback(const std_msgs::msg::Bool::SharedPtr msg)
+    {
+        is_flying = msg->data;
+    }
+
     void rGetSensorData()
     {
         if (!pOdom) return;
@@ -125,14 +133,13 @@ public:
 
         pPos.X = {pOdom->pose.pose.position.x,
                   pOdom->pose.pose.position.y,
-                  pOdom->pose.pose.position.z,
+                  1.0,
                   yaw};
 
-        // --- Calcular velocidades ---
         std::vector<double> new_dX(4);
         new_dX[0] = pOdom->twist.twist.linear.x;
         new_dX[1] = pOdom->twist.twist.linear.y;
-        new_dX[2] = pOdom->twist.twist.linear.z;
+        new_dX[2] = 0.0;
 
         static double last_yaw = yaw;
         static bool first = true;
@@ -150,7 +157,6 @@ public:
         new_dX[3] = yaw_rate;
         pPos.dX = new_dX;
 
-        // --- Calcular aceleraciones ---
         if (first_read)
         {
             std::fill(pPos.ddX.begin(), pPos.ddX.end(), 0.0);
@@ -164,16 +170,19 @@ public:
         last_vel = pPos.dX;
     }
 
-    // ------------------------------------------------------------------------
     void cInverseDynamicController_Compensador(const std::vector<double> &gains)
     {
         if (!ref_received)
-            return; // No hace nada si no hay referencia
+            return;
 
         std::vector<double> g = gains;
         if (g.empty())
-            g = {2, 2, 3, 1.5,
-                 2, 2, 1.8, 5,
+            //g = {2.0, 2.0, 3, 1.5,
+            //     1.8, 1.8, 1.8, 2.0,
+            //     1, 1, 1, 1.5,
+            //     1, 1, 1, 1};
+            g = {1.0, 1.0, 3, 1.5,
+                 1.2, 1.2, 1.8, 2.0,
                  1, 1, 1, 1.5,
                  1, 1, 1, 1};
 
@@ -225,7 +234,7 @@ public:
 
         Eigen::Vector4d Ucw_ant(pSC.Ur[0], pSC.Ur[1], pSC.Ur[2], pSC.Ur[3]);
         Eigen::Vector4d Ucw = dXd + Ksp * ((Kp * Xtil).array().tanh()).matrix();
-        const double dt_control = 1.0 / 30.0;
+        const double dt_control = 1.0 / 10.0; // <-- 10 Hz
         Eigen::Vector4d dUcw = (Ucw - Ucw_ant) / std::max(dt_control, 1e-3);
         pSC.Ur = {Ucw[0], Ucw[1], Ucw[2], Ucw[3]};
 
@@ -238,10 +247,10 @@ public:
 
         Eigen::Vector4d Udw = (F * Ku).inverse() * (dUcw + Ksd * (Ucw - dX) + Kv * dX);
 
-        std::vector<double> k_max = {1.3, 1.3, 1.0, 1};
-        std::vector<double> k_min = {0.4, 0.4, 0.8, 1};
+        std::vector<double> k_max = {0.25, 0.20, 1.0, 1.3};
+        std::vector<double> k_min = {0.21, 0.1, 1.0, 1.1};
         std::vector<double> n_exp = {2.0, 2.0, 2.0, 2.0};
-        std::vector<double> e0    = {0.04, 0.04, 0.02, 0.02};
+        std::vector<double> e0    = {0.03, 0.03, 0.08, 0.01};
 
         Eigen::Vector4d Kdyn;
         for (int i = 0; i < 4; ++i)
@@ -257,17 +266,17 @@ public:
         pSC.Ud[5] = Udw[3];
     }
 
-    // ------------------------------------------------------------------------
     void rSendControlSignals()
     {
-        if (!ref_received)
-            return;  // No publicar si no hay referencia
+        if (!ref_received || !is_flying)
+            return;
 
         geometry_msgs::msg::Twist cmd_sat;
         cmd_sat.linear.x  = std::clamp(pSC.Ud[0], -pPar.uSat[0], pPar.uSat[0]);
         cmd_sat.linear.y  = std::clamp(pSC.Ud[1], -pPar.uSat[1], pPar.uSat[1]);
         cmd_sat.linear.z  = std::clamp(pSC.Ud[2], -pPar.uSat[2], pPar.uSat[2]);
         cmd_sat.angular.z = std::clamp(pSC.Ud[5], -pPar.uSat[5], pPar.uSat[5]);
+
         pubCmd->publish(cmd_sat);
     }
 
@@ -275,11 +284,13 @@ public:
     Parameters pPar;
     SC pSC;
     bool ref_received;
+    bool is_flying;
 
 private:
     rclcpp::Node *pNode;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr subOdom;
     rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr subRef;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr subIsFlying;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pubCmd;
     nav_msgs::msg::Odometry::SharedPtr pOdom;
     std::vector<double> last_vel, last_ref;
@@ -295,9 +306,9 @@ class NeroDroneNode : public rclcpp::Node
 public:
     NeroDroneNode() : Node("nero_drone_node")
     {
-        RCLCPP_INFO(this->get_logger(), "Nero Drone Node iniciado (esperando referencia externa)");
+        RCLCPP_INFO(this->get_logger(), "Nero Drone Node iniciado (10 Hz)");
         drone = std::make_shared<Bebop>(this);
-        timer = this->create_wall_timer(33ms, std::bind(&NeroDroneNode::controlLoop, this));
+        timer = this->create_wall_timer(100ms, std::bind(&NeroDroneNode::controlLoop, this)); // <-- 10 Hz
     }
 
 private:

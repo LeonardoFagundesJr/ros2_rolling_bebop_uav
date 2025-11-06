@@ -28,7 +28,7 @@ def generate_launch_description():
             executable='isfly',
             name='isfly',
             output='screen',
-        ),     
+        ),       
 
         Node(
             package='nero_drone',
@@ -42,34 +42,19 @@ def generate_launch_description():
             executable='safe_bebop_republisher',
             name='safe_bebop_republisher',
             output='screen'
-        ), 
-        # --- Robot State Publisher ---
-        Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            name='robot_state_publisher',
-            output='screen',
-            parameters=[{'robot_description': open(urdf_file).read()}]
         ),
 
-        # --- Visualization ---
         Node(
-            package='rviz2',
-            executable='rviz2',
-            arguments=['-d', rviz_config],
-            output='screen'
-        ),
+            package='nero_drone',
+            executable='inverse_dynamic_controller',
+            name='inverse_dynamic_controller',
+            output='screen',
+        ),   
+
         Node(
             package='nero_drone',
             executable='bebop_control_gui.py',
             name='bebop_control_gui',
-            output='screen'
-        ),
-
-        Node(
-            package='nero_drone',
-            executable='ref_vec_filter',
-            name='ref_vec_filter',
             output='screen'
         ),
     ])
