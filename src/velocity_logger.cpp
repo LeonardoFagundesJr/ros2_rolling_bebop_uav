@@ -200,14 +200,13 @@ private:
 
         logfile_ << last_odom_.pose.pose.position.x << ","
                  << last_odom_.pose.pose.position.y << ","
-                 //<< last_odom_.pose.pose.position.z << ","
-                 << 1.0 << ","
+                 << last_odom_.pose.pose.position.z << ","
                  << yaw_cont_ << ",";
 
         logfile_ << last_odom_.twist.twist.linear.x << ","
                  << last_odom_.twist.twist.linear.y << ","
-                 //<< last_odom_.twist.twist.linear.z << ","
-                 << 0.0 << ","
+                 << last_odom_.twist.twist.linear.z << ","
+
                  << yaw_rate_ << ",";
 
         if (ref_received_)

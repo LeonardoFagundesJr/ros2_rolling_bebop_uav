@@ -40,15 +40,14 @@ def generate_launch_description():
 
         Node(
             package='nero_drone',
-            executable='inverse_dynamic_controller',
-            name='inverse_dynamic_controller',
-            output='screen',
-        ),   
-
-        Node(
-            package='nero_drone',
             executable='bebop_control_gui.py',
             name='bebop_control_gui',
+            output='screen'
+        ),
+        Node(
+            package='nero_drone',
+            executable='controlador.py',
+            name='controlador',
             output='screen'
         ),
     ])

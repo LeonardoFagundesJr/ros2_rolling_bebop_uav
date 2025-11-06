@@ -24,11 +24,11 @@ class RefPublisher(Node):
         # --------------------- Puntos del cubo (1.5 m de lado) ---------------------
         L = 1.5
         self.points = np.array([
-            [0.0, 0.0, 1.0],        # Centro
-            [L/2, L/2, 1.0],        # Esquina superior derecha
-            [-L/2, L/2, 1.0],       # Esquina superior izquierda
-            [-L/2, -L/2, 1.0],      # Inferior izquierda
-            [L/2, -L/2, 1.0]        # Inferior derecha
+            [0.0, 0.0, 1.5],        # Centro
+            [L/2, L/2, 1.7],        # Esquina superior derecha
+            [-L/2, L/2, 1.4],       # Esquina superior izquierda
+            [-L/2, -L/2, 1.8],      # Inferior izquierda
+            [L/2, -L/2, 1.2]        # Inferior derecha
         ])
 
         # --------------------- Yaw asociados (en radianes) ---------------------

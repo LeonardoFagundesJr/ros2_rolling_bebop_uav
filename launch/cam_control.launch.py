@@ -44,12 +44,7 @@ def generate_launch_description():
             output='screen'
         ),
 
-        Node(
-            package='nero_drone',
-            executable='inverse_dynamic_controller',
-            name='inverse_dynamic_controller',
-            output='screen',
-        ),   
+
 
         Node(
             package='nero_drone',
@@ -75,6 +70,12 @@ def generate_launch_description():
             package='nero_drone',
             executable='ref_vec_filter',
             name='ref_vec_filter',
+            output='screen'
+        ),
+        Node(
+            package='nero_drone',
+            executable='controlador.py',
+            name='controlador',
             output='screen'
         ),
     ])

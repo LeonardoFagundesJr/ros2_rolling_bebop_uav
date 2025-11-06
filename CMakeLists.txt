@@ -88,17 +88,6 @@ ament_target_dependencies(visual
 add_executable(land src/land.cpp)
 ament_target_dependencies(land rclcpp std_msgs)
 
-add_executable(inverse_dynamic_controller src/InverseDynamicController.cpp)
-ament_target_dependencies(inverse_dynamic_controller
-  rclcpp
-  nav_msgs
-  geometry_msgs
-  std_msgs
-  tf2
-  tf2_geometry_msgs
-  Eigen3
-)
-
 
 add_executable(safety_watchdog
   src/safe_watchdog.cpp
@@ -125,7 +114,6 @@ install(TARGETS
   velocity_logger
   tagfollow
   visual
-  inverse_dynamic_controller
   safety_watchdog
   safe_bebop_republisher
   land
@@ -145,6 +133,7 @@ install(PROGRAMS
   nero_drone/bebop_control_gui.py
   nero_drone/ref_pos.py
   nero_drone/ref_trayectory.py
+  nero_drone/controlador.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
