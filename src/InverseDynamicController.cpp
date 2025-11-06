@@ -177,14 +177,9 @@ public:
 
         std::vector<double> g = gains;
         if (g.empty())
-            //g = {2.0, 2.0, 3, 1.5,
-            //     1.8, 1.8, 1.8, 2.0,
-            //     1, 1, 1, 1.5,
-            //     1, 1, 1, 1};
-            g = {1.0, 1.0, 3, 1.5,
-                 1.2, 1.2, 1.8, 2.0,
-                 1, 1, 1, 1.5,
-                 1, 1, 1, 1};
+            g = {2.0, 2.0, 3, 1.5,
+                 1.4, 1.4, 1.8, 1.0,
+                 2.3, 2.3, 1, 1.0};
 
         Eigen::Matrix4d Ku = Eigen::Matrix4d::Zero();
         Eigen::Matrix4d Kv = Eigen::Matrix4d::Zero();
@@ -199,7 +194,7 @@ public:
               0, 0, pPar.Model_simp[5], 0,
               0, 0, 0, pPar.Model_simp[7];
 
-        Eigen::Matrix4d Ksp, Ksd, Kp, Kd;
+        Eigen::Matrix4d Ksp, Ksd, Kp;
         Ksp << g[0], 0, 0, 0,
                0, g[1], 0, 0,
                0, 0, g[2], 0,
@@ -215,10 +210,6 @@ public:
               0, 0, g[10], 0,
               0, 0, 0, g[11];
 
-        Kd << g[12], 0, 0, 0,
-              0, g[13], 0, 0,
-              0, 0, g[14], 0,
-              0, 0, 0, g[15];
 
         Eigen::Vector4d X, dX, ddX, Xd, dXd, ddXd;
         X    << pPos.X[0],  pPos.X[1],  pPos.X[2],  pPos.X[3];
@@ -247,19 +238,28 @@ public:
 
         Eigen::Vector4d Udw = (F * Ku).inverse() * (dUcw + Ksd * (Ucw - dX) + Kv * dX);
 
-        std::vector<double> k_max = {0.25, 0.20, 1.0, 1.3};
-        std::vector<double> k_min = {0.21, 0.1, 1.0, 1.1};
-        std::vector<double> n_exp = {2.0, 2.0, 2.0, 2.0};
-        std::vector<double> e0    = {0.03, 0.03, 0.08, 0.01};
+        Eigen::Vector4d Xtil_body = F.transpose() * Xtil;
 
-        Eigen::Vector4d Kdyn;
+        // Parámetros de ganancia dinámica
+        std::vector<double> k_max = {0.24, 0.24, 1.0, 1.2};
+        std::vector<double> k_min = {0.21, 0.21, 1.0, 1.0};
+        std::vector<double> n_exp = {2.0, 2.0, 2.0, 2.0};
+        std::vector<double> e0    = {0.06, 0.06, 0.08, 0.03};
+
+        // Calcular Kdyn en función del error expresado en el cuerpo
+        Eigen::Vector4d Kdyn_vec;
         for (int i = 0; i < 4; ++i)
         {
-            double e_abs = std::abs(Xtil[i]);
-            Kdyn[i] = k_min[i] + (k_max[i] - k_min[i]) / (1.0 + std::pow(e_abs / e0[i], n_exp[i]));
+            double e_abs = std::abs(Xtil_body[i]);
+            Kdyn_vec[i] = k_min[i] + (k_max[i] - k_min[i]) /
+                                         (1.0 + std::pow(e_abs / e0[i], n_exp[i]));
         }
+        Eigen::Matrix4d Kdyn = Kdyn_vec.asDiagonal();
 
-        Udw = Kdyn.asDiagonal() * Udw;
+        // Aplicar Kdyn a las velocidades deseadas (Udw)
+        Udw = Kdyn * Udw;
+
+        // Guardar los comandos de control
         pSC.Ud[0] = Udw[0];
         pSC.Ud[1] = Udw[1];
         pSC.Ud[2] = Udw[2];
