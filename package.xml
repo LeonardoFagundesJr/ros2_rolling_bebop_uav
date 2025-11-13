@@ -3,7 +3,7 @@
   <name>nero_drone</name>
   <version>0.0.0</version>
   <description>Paquete ROS2 mixto (C++ y Python) para prueba</description>
-  <maintainer email="user@example.com">Brayan</maintainer>
+  <maintainer email="leonardo.fagundes@ufv.br">Leo Fagundes</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

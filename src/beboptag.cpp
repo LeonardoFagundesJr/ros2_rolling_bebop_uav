@@ -72,8 +72,14 @@ private:
 
             double s = tag_size_ / 2.0;
             std::vector<cv::Point3f> objectPoints = {
-                {-s, -s, 0}, { s, -s, 0}, { s,  s, 0}, { -s,  s, 0}
+                {(float)-s,(float)-s,0}, 
+                {(float)s,(float)-s,0}, 
+                {(float)s,(float)s,0}, 
+                {(float)-s,(float)s,0}
             };
+            // std::vector<cv::Point3f> objectPoints = {
+            //     {-s, -s, 0}, { s, -s, 0}, { s,  s, 0}, { -s,  s, 0}
+            // };
             std::vector<cv::Point2f> imagePoints = {
                 {static_cast<float>(det->p[0][0]), static_cast<float>(det->p[0][1])},
                 {static_cast<float>(det->p[1][0]), static_cast<float>(det->p[1][1])},

@@ -13,11 +13,12 @@
 #include <opencv2/opencv.hpp>
 #include <apriltag/apriltag.h>
 #include <apriltag/tag36h11.h>
-#include <tf2/LinearMath/Quaternion.h>
+// #include <tf2/LinearMath/Quaternion.h>
+
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
-#include <tf2_ros/transform_broadcaster.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.hpp>
+#include <tf2_ros/transform_listener.hpp>
+#include <tf2_ros/buffer.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <thread>
 #include <mutex>
@@ -102,7 +103,10 @@ private:
 
             double s = tag_size_ / 2.0;
             std::vector<cv::Point3f> objectPoints = {
-                {-s,-s,0}, {s,-s,0}, {s,s,0}, {-s,s,0}
+                {(float)-s,(float)-s,0}, 
+                {(float)s,(float)-s,0}, 
+                {(float)s,(float)s,0}, 
+                {(float)-s,(float)s,0}
             };
             std::vector<cv::Point2f> imagePoints = {
                 {(float)det->p[0][0], (float)det->p[0][1]},
